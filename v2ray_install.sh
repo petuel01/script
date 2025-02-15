@@ -1,8 +1,8 @@
 #!/bin/bash
 
-##########################
-#......PETZEUSTECH.......#
-####################$#####
+echo "##########################
+      #......PETZEUSTECH.......#
+      ##########################"
 
 # Prompt user for domain and email
 read -p "Enter your domain (e.g., example.com): " DOMAIN
@@ -121,6 +121,7 @@ sudo ufw allow 80
 sudo ufw allow 443
 sudo ufw enable
 
+# Output success message and client details
 echo "Setup complete!"
 echo "V2Ray Xray-core is running with WebSocket over TLS on port 443."
 echo "Use the following details in your VPN client:"
@@ -131,10 +132,3 @@ echo "UUID: $UUID"
 echo "TLS: Enabled"
 echo "WebSocket Path: /v2ray"
 echo "----------------------------------------------------"
-
-
-echo "THANKS FOR USING THIS SCRIPT 
-
-   FOR SUPPORT 
-  
-   CONTACT:677251088"
