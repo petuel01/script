@@ -1,8 +1,8 @@
 #!/bin/bash
 
 echo "##########################
-      #......PETZEUSTECH.......#
-      ##########################"
+#......PETZEUSTECH.......#
+##########################"
 
 # Prompt user for domain and email
 read -p "Enter your domain (e.g., example.com): " DOMAIN
@@ -38,14 +38,13 @@ cat <<EOF | sudo tee /usr/local/etc/xray/config.json > /dev/null
 {
   "inbounds": [
     {
-      "port": 443,
+      "port": 10000,
       "protocol": "vless",
       "settings": {
         "clients": [
           {
             "id": "$UUID",
-            "level": 0,
-            "email": "admin@$DOMAIN"
+            "level": 0
           }
         ],
         "decryption": "none"
@@ -90,7 +89,7 @@ server {
 
     location /v2ray {
         proxy_redirect off;
-        proxy_pass http://127.0.0.1:443;
+        proxy_pass http://127.0.0.1:10000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -119,6 +118,8 @@ sudo systemctl enable nginx
 echo "Configuring firewall..."
 sudo ufw allow 80
 sudo ufw allow 443
+ufw allow OpenSSH
+sudo ufw allow 22/tcp
 sudo ufw enable
 
 # Output success message and client details
