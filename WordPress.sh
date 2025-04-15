@@ -1,100 +1,71 @@
 #!/bin/bash
-# Ultimate WordPress Multi-Site Installer
-# Handles all steps: domains, databases, Nginx, SSL, and permissions
 
-# ===== COLOR SETUP =====
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+# WordPress Installer with Confirmation, Error Handling, and Final Summary
+# By ChatGPT - Made for Production Use
 
-# ===== INITIAL CHECKS =====
-if [ "$(id -u)" -ne 0 ]; then
-  echo -e "${RED}This script must be run as root!${NC}"
-  exit 1
-fi
-
-# ===== USER INPUT =====
-read -p "Enter base domain (e.g., duckdns.org): " BASE_DOMAIN
-read -p "How many WordPress sites to install? " SITE_COUNT
-
-DOMAINS=()
-for ((i=1; i<=$SITE_COUNT; i++)); do
-  read -p "Enter subdomain #$i (without .$BASE_DOMAIN): " SUBDOMAIN
-  DOMAINS+=("$SUBDOMAIN.$BASE_DOMAIN")
-done
-
-read -p "MySQL root password: " MYSQL_ROOT_PASS
-read -p "Email for Let's Encrypt certificates: " EMAIL
-
-# ===== SYSTEM CONFIG =====
-WEB_ROOT="/var/www"
-PHP_VERSION=$(php -v | head -n 1 | cut -d " " -f 2 | cut -d "." -f 1-2)
-
-# ===== FUNCTIONS =====
-create_db_user() {
-  local DB_NAME=$1
-  local DB_USER=$2
-  
-  # Generate random password
-  local DB_PASS=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
-  
-  mysql -u root -p"$MYSQL_ROOT_PASS" <<MYSQL_SCRIPT
-CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
-GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
-FLUSH PRIVILEGES;
-MYSQL_SCRIPT
-
-  echo "$DB_PASS"
+prompt_step() {
+    echo -e "\n\e[36m$1\e[0m"
+    read -p "Do you want to continue this step? (y/n): " CONFIRM
+    if [[ "$CONFIRM" != "y" ]]; then
+        echo -e "\e[33mSkipping: $1\e[0m"
+        return 1
+    fi
+    return 0
 }
 
-setup_wordpress() {
-  local DOMAIN=$1
-  local DIR_NAME="${DOMAIN%%.*}"
-  local SITE_PATH="$WEB_ROOT/$DIR_NAME"
-  
-  echo -e "\n${YELLOW}=== Setting up $DOMAIN ===${NC}"
-  
-  # 1. Create directory structure
-  mkdir -p "$SITE_PATH"
-  cd "$SITE_PATH" || exit
-  
-  # 2. Download and extract WordPress
-  echo -e "${GREEN}Downloading WordPress...${NC}"
-  wget -q https://wordpress.org/latest.tar.gz
-  tar -xzf latest.tar.gz --strip-components=1
-  rm latest.tar.gz
-  
-  # 3. Set permissions
-  chown -R www-data:www-data "$SITE_PATH"
-  find "$SITE_PATH" -type d -exec chmod 755 {} \;
-  find "$SITE_PATH" -type f -exec chmod 644 {} \;
-  
-  # 4. Database setup
-  local DB_NAME="wp_${DIR_NAME}"
-  local DB_USER="user_${DIR_NAME}"
-  local DB_PASS=$(create_db_user "$DB_NAME" "$DB_USER")
-  
-  # 5. Configure wp-config.php
-  cp wp-config-sample.php wp-config.php
-  sed -i "s/database_name_here/$DB_NAME/" wp-config.php
-  sed -i "s/username_here/$DB_USER/" wp-config.php
-  sed -i "s/password_here/$DB_PASS/" wp-config.php
-  
-  # 6. Secure table prefix
-  local TABLE_PREFIX="wp_$(openssl rand -hex 3)_"
-  sed -i "s/\$table_prefix = 'wp_';/\$table_prefix = '$TABLE_PREFIX';/" wp-config.php
-  
-  # 7. Add security keys
-  curl -s https://api.wordpress.org/secret-key/1.1/salt/ >> wp-config.php
-  
-  # 8. Create Nginx config
-  cat > "/etc/nginx/sites-available/$DOMAIN" <<NGINX_CONFIG
+handle_error() {
+    echo -e "\e[31mError in step: $1. Exiting...\e[0m"
+    exit 1
+}
+
+# === USER INPUTS ===
+read -p "Enter your full domain (e.g., petueltech.duckdns.org): " DOMAIN
+DOMAIN_BASE=$(echo "$DOMAIN" | cut -d '.' -f1)
+WEB_ROOT="/var/www/$DOMAIN_BASE"
+PHP_VERSION=$(php -v | head -n1 | cut -d" " -f2 | cut -d"." -f1-2)
+
+read -p "Enter MySQL root password: " DB_ROOT_PASS
+read -p "Enter database name to create: " DB_NAME
+read -p "Enter MySQL username: " DB_USER
+read -s -p "Enter MySQL password for $DB_USER: " DB_PASS
+echo
+read -p "WordPress admin username: " WP_ADMIN
+read -s -p "WordPress admin password: " WP_ADMIN_PASS
+echo
+read -p "WordPress admin email: " WP_EMAIL
+
+# === 1. Install Dependencies ===
+prompt_step "1. Install Dependencies (Nginx, PHP, MySQL, etc.)" && {
+    sudo apt update && sudo apt install -y nginx mysql-server php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-zip unzip curl wget
+} || handle_error "Dependency Installation"
+
+# === 2. Setup MySQL ===
+prompt_step "2. Create MySQL Database and User" && {
+    sudo mysql -u root -p"$DB_ROOT_PASS" <<EOF
+CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
+GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+} || handle_error "MySQL Setup"
+
+# === 3. Download & Configure WordPress ===
+prompt_step "3. Download and Configure WordPress in $WEB_ROOT" && {
+    sudo mkdir -p "$WEB_ROOT" && cd "$WEB_ROOT" || exit 1
+    sudo wget -q https://wordpress.org/latest.tar.gz && sudo tar -xzf latest.tar.gz --strip-components=1 && sudo rm latest.tar.gz
+    sudo chown -R www-data:www-data "$WEB_ROOT"
+    sudo find "$WEB_ROOT" -type d -exec chmod 755 {} \;
+    sudo find "$WEB_ROOT" -type f -exec chmod 644 {} \;
+} || handle_error "WordPress Setup"
+
+# === 4. Configure Nginx ===
+prompt_step "4. Create Nginx Config for $DOMAIN" && {
+    NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
+    sudo bash -c "cat > $NGINX_CONF" <<NGINX
 server {
     listen 80;
     server_name $DOMAIN;
-    root $SITE_PATH;
+    root $WEB_ROOT;
     index index.php index.html index.htm;
 
     location / {
@@ -103,94 +74,54 @@ server {
 
     location ~ \.php\$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-        include fastcgi_params;
+        fastcgi_pass unix:/run/php/php$PHP_VERSION-fpm.sock;
     }
 
     location ~ /\.ht {
         deny all;
     }
 }
-NGINX_CONFIG
+NGINX
+    sudo ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/
+    sudo nginx -t && sudo systemctl reload nginx
+} || handle_error "Nginx Configuration"
 
-  # 9. Enable site
-  ln -s "/etc/nginx/sites-available/$DOMAIN" "/etc/nginx/sites-enabled/"
-  
-  echo -e "${GREEN}Created database: ${DB_NAME} with user ${DB_USER}${NC}"
-}
+# === 5. Install WP-CLI and Run Setup ===
+prompt_step "5. Configure WordPress Using WP-CLI" && {
+    if ! command -v wp &> /dev/null; then
+        curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        chmod +x wp-cli.phar
+        sudo mv wp-cli.phar /usr/local/bin/wp
+    fi
+    cd "$WEB_ROOT"
+    sudo -u www-data wp core config --dbname="$DB_NAME" --dbuser="$DB_USER" --dbpass="$DB_PASS" --dbhost="localhost" --dbprefix="wp_"
+    sudo -u www-data wp core install --url="https://$DOMAIN" --title="$DOMAIN_BASE" --admin_user="$WP_ADMIN" --admin_password="$WP_ADMIN_PASS" --admin_email="$WP_EMAIL"
+} || handle_error "WP-CLI Setup"
 
-# ===== MAIN SCRIPT =====
-clear
-echo -e "${YELLOW}=== WordPress Multi-Site Setup ===${NC}"
+# === 6. Certbot SSL ===
+prompt_step "6. Install Certbot and Secure Domain with HTTPS" && {
+    if ! command -v certbot &> /dev/null; then
+        sudo apt install -y certbot python3-certbot-nginx
+    fi
+    sudo certbot --nginx -d "$DOMAIN"
+} || handle_error "Certbot SSL Setup"
 
-# 1. System updates
-echo -e "\n${YELLOW}Updating system...${NC}"
-apt update && apt upgrade -y
+# === 7. Final Firewall Rules ===
+prompt_step "7. Enable UFW Firewall and Allow Nginx + SSH" && {
+    sudo ufw allow 'Nginx Full'
+    sudo ufw allow OpenSSH
+    sudo ufw --force enable
+} || handle_error "UFW Firewall Setup"
 
-# 2. Install required packages
-echo -e "\n${YELLOW}Installing dependencies...${NC}"
-apt install -y nginx mysql-server php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-zip certbot python3-certbot-nginx
-
-# 3. Secure MySQL
-echo -e "\n${YELLOW}Securing MySQL...${NC}"
-mysql -u root <<MYSQL_SECURE
-ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$MYSQL_ROOT_PASS';
-DELETE FROM mysql.user WHERE User='';
-DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
-DROP DATABASE IF EXISTS test;
-DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
-FLUSH PRIVILEGES;
-MYSQL_SECURE
-
-# 4. Setup each WordPress site
-for DOMAIN in "${DOMAINS[@]}"; do
-  setup_wordpress "$DOMAIN"
-done
-
-# 5. Test and restart Nginx
-echo -e "\n${YELLOW}Configuring Nginx...${NC}"
-nginx -t && systemctl restart nginx
-
-# 6. Install SSL certificates
-echo -e "\n${YELLOW}Setting up SSL certificates...${NC}"
-for DOMAIN in "${DOMAINS[@]}"; do
-  certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "$EMAIL" --redirect
-done
-
-# 7. Setup automatic renewal
-echo -e "\n${YELLOW}Configuring automatic certificate renewal...${NC}"
-(crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook \"systemctl reload nginx\"") | crontab -
-
-# ===== COMPLETION =====
-echo -e "\n${GREEN}=== Setup Complete ===${NC}"
-echo -e "\n${YELLOW}WordPress sites installed:${NC}"
-for DOMAIN in "${DOMAINS[@]}"; do
-  echo -e "${GREEN}https://$DOMAIN${NC}"
-  echo -e "Admin URL: ${GREEN}https://$DOMAIN/wp-admin${NC}"
-done
-
-echo -e "\n${YELLOW}MySQL root password:${NC} $MYSQL_ROOT_PASS"
-echo -e "\n${YELLOW}Backup these credentials!${NC}"
-
-# Save credentials to file
-cat > "$WEB_ROOT/wordpress_credentials.txt" <<CREDS
-=== WordPress Installation Details ===
-$(date)
-
-MySQL Root Password: $MYSQL_ROOT_PASS
-
-Sites:
-$(for DOMAIN in "${DOMAINS[@]}"; do
-  DIR_NAME="${DOMAIN%%.*}"
-  echo "Domain: https://$DOMAIN"
-  echo "Path: $WEB_ROOT/$DIR_NAME"
-  echo "DB Name: wp_${DIR_NAME}"
-  echo "DB User: user_${DIR_NAME}"
-  grep "define.*'DB_PASSWORD'" "$WEB_ROOT/$DIR_NAME/wp-config.php" | awk -F"'" '{print "DB Password: " $4}'
-  echo "Table Prefix: $(grep '$table_prefix' "$WEB_ROOT/$DIR_NAME/wp-config.php" | cut -d"'" -f2)"
-  echo ""
-done)
-CREDS
-
-echo -e "\nCredentials saved to: ${GREEN}$WEB_ROOT/wordpress_credentials.txt${NC}"
+# === 8. Final Summary ===
+echo -e "\n\e[1;32m================= INSTALLATION COMPLETE =================\e[0m"
+echo -e "\e[36mWebsite:\e[0m       https://$DOMAIN"
+echo -e "\e[36mAdmin URL:\e[0m     https://$DOMAIN/wp-admin"
+echo -e "\e[36mWordPress User:\e[0m  $WP_ADMIN"
+echo -e "\e[36mWordPress Pass:\e[0m  $WP_ADMIN_PASS"
+echo -e "\e[36mWP Email:\e[0m       $WP_EMAIL"
+echo -e "\e[36mDatabase:\e[0m       $DB_NAME"
+echo -e "\e[36mDB User:\e[0m        $DB_USER"
+echo -e "\e[36mDB Pass:\e[0m        $DB_PASS"
+echo -e "\e[36mSite Folder:\e[0m    $WEB_ROOT"
+echo -e "\e[1;32m=========================================================\e[0m"
