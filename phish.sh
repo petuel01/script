@@ -1,24 +1,25 @@
 #!/bin/bash
 
-# Zphisher startup script
+# Zphisher auto-setup and startup script
 
 ZPHISHER_DIR="$HOME/Zphisher"
 
-echo "[*] Setting up Zphisher..."
+echo "[*] Preparing Zphisher environment..."
 
-# Check if Zphisher folder exists
-if [ ! -d "$ZPHISHER_DIR" ]; then
-    echo "[+] Cloning Zphisher..."
+if [ -d "$ZPHISHER_DIR" ]; then
+    echo "[*] Zphisher folder already exists. Entering directory..."
+else
+    echo "[+] Zphisher folder not found. Cloning repository..."
     git clone https://github.com/htr-tech/zphisher.git "$ZPHISHER_DIR"
 fi
 
-cd "$ZPHISHER_DIR"
+cd "$ZPHISHER_DIR" || { echo "[-] Failed to enter Zphisher directory."; exit 1; }
 
-echo "[*] Setting permissions..."
+echo "[*] Setting executable permissions..."
 chmod +x zphisher.sh
 
-echo "[*] Starting Zphisher with Cloudflare in a screen session..."
-# Start Zphisher using screen to keep it running in background
+echo "[*] Launching Zphisher with Cloudflare in a screen session..."
 screen -dmS zphisher bash -c './zphisher.sh'
 
-echo "[+] Zphisher is running in a screen session. Use 'screen -r zphisher' to attach."
+echo "[+] Zphisher is running in a screen session."
+echo "[*] Use 'screen -r zphisher' to view it or Ctrl+A then D to detach."
